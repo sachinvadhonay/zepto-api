@@ -1,9 +1,10 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using System.Runtime.InteropServices;
 using Zepto_API.Data;
+using Zepto_API.DTOs;
 using Zepto_API.Interfaces;
 using Zepto_API.Models;
-using Zepto_API.DTOs;
 
 
 namespace Zepto_API.Services
@@ -29,8 +30,30 @@ namespace Zepto_API.Services
                   Quantity = p.Inventories.Sum(i => i.QuatityAvailable ?? 0)
               })
               .ToListAsync();
-        }         
+        }
+        private async Task<string?> SaveImage(IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+                return null;
 
+            var fileName = Guid.NewGuid().ToString() + Path.GetExtension(file.FileName);
+
+            var folderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot/images");
+
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+
+            var filePath = Path.Combine(folderPath, fileName);
+
+            using (var stream = new FileStream(filePath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+            return "/images/" + fileName;
+        }
 
         public async Task<string> CreateProduct(CreateProductDto dto)
         {
@@ -39,28 +62,7 @@ namespace Zepto_API.Services
             try 
             {
 
-                string imagePath = null;
-
-                 
-                if (dto.ImageFile != null && dto.ImageFile.Length > 0)
-                {
-                    string folder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot/images");
-
-                    if (!Directory.Exists(folder))
-                    {
-                        Directory.CreateDirectory(folder);
-                    }
-
-                    string fileName = Guid.NewGuid().ToString() + Path.GetExtension(dto.ImageFile.FileName);
-                    string filePath = Path.Combine(folder, fileName);
-
-                    using (var stream = new FileStream(filePath, FileMode.Create))
-                    {
-                        await dto.ImageFile.CopyToAsync(stream);
-                    }
-
-                    imagePath = "/images/" + fileName;
-                }
+                var imagePath = await SaveImage(dto.ImageFile);
 
 
                 var product = new Product
@@ -113,6 +115,67 @@ namespace Zepto_API.Services
                     ImageUrl = p.ImageUrl,
                     Quantity = p.Inventories.Sum(i => i.QuatityAvailable ?? 0)
                 }).FirstOrDefaultAsync();
+        }
+
+
+        
+
+        public async Task<bool> UpdateProduct(int id,UpdateProductDto dto)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+
+                var existingProduct = await _context.Products.FindAsync(id);
+
+                if(existingProduct == null)
+                {
+                    return false;
+                }
+
+                existingProduct.Productname = dto.Productname;
+                existingProduct.Description = dto.Description;
+                existingProduct.Price = dto.Price;
+                existingProduct.CategoryId = dto.CategoryId;
+
+                if (dto.ImageFile != null && dto.ImageFile.Length > 0)
+                {
+                    var imagePath = await SaveImage(dto.ImageFile);
+                    existingProduct.ImageUrl = imagePath;
+                }
+
+                var inventory = await _context.Inventories.FirstOrDefaultAsync(x => x.ProductId == id);
+
+                if (inventory != null)
+                {
+                    inventory.VendorId = dto.VendorId;
+                    inventory.QuatityAvailable = dto.Quantity;
+                    inventory.LastUpdated = DateTime.Now;
+                }
+                else
+                {
+                    // If not exists → create new
+                    var newInventory = new Inventory
+                    {
+                        ProductId = id,
+                        VendorId = dto.VendorId,
+                        QuatityAvailable = dto.Quantity,
+                        LastUpdated = DateTime.Now
+                    };
+
+                    _context.Inventories.Add(newInventory);
+                }
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                 return true;
+
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
     }
 }   

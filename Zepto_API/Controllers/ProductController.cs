@@ -48,5 +48,17 @@ namespace Zepto_API.Controllers
             }
             return Ok(product);
         }
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateProduct(int id, [FromForm] UpdateProductDto dto)
+        {
+            var result = await _productservice.UpdateProduct(id, dto);
+
+            if (!result)
+            {
+                return NotFound("Product not found");
+            }
+
+            return Ok("Updated successfully");
+        }
     }
 }
